@@ -62,7 +62,7 @@ the most I would accept if it were my own work being judged.
 
 ---
 
-## 2.Clearly-AI and clearly-human text score far apart
+## 2. Clearly-AI and clearly-human text score far apart
 
 <!-- Your criterion. -->
 Across 5 clearly AI-generated texts (produced by a chatbot from a one-line

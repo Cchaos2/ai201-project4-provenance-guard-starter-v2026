@@ -554,17 +554,44 @@ Content-Type: application/json
 
 ## How I Used AI
 
-**Moment 1**
+I used Claude throughout as a reviewer and pair-programmer. Two moments
+changed the project.
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+**Moment 1: a 403 that wasn't my code**
 
-**Moment 2**
+- *What I asked for:* my first hardcoded `/submit` seemed to return nothing.
+  Then, from a second terminal, `curl` returned `403 Forbidden`. I pasted the
+  full response and asked what was wrong with my route.
+- *What came back:* the answer was in the headers. The response said
+  `Server: AirTunes`, not `Server: Werkzeug`, so the request had reached
+  macOS's AirPlay Receiver, which also listens on port 5000, not my Flask
+  app. My server wasn't running at that moment, so AirPlay answered instead.
+  It also explained that the terminal running `python app.py` is busy with
+  the server, so requests must go from a second terminal.
+- *What I changed:* I turned off AirPlay Receiver (System Settings → General
+  → AirDrop & Handoff), restarted the server, and from then on checked
+  `/ping` first and looked for `Server: Werkzeug` in every `curl -i`
+  response. That is the control-route habit the brief describes: when
+  something breaks, first find out whether it's the service or the handler.
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+**Moment 2: my own writing was labelled AI**
+
+- *What I asked for:* a short paragraph I wrote myself ("Today is going to
+  be a good day...", 33 words) came back as high-confidence AI at 0.7655. I
+  asked Claude why, and whether I should change the thresholds.
+- *What came back:* it pointed at the two signal scores. `model_score` was
+  0.8925, higher than my clearly-AI sample, because common words in an
+  ordinary order are exactly what GPT-2 predicts; `style_score` was 0.5751,
+  pulled toward 0.5 because the text was short. It advised against moving the
+  thresholds to hide the result: the text is outside criterion 1 (which needs
+  100+ words), and it is a real case for Unit 8's diagnosis.
+- *What I changed:* I kept the text as evidence
+  (`samples/false_positive_short.json`), wrote it up under Label Variants,
+  and wrote two longer paragraphs of my own to test the human label. The
+  first (`human_2`) still landed in "unsure" (0.5422), which taught me that
+  "First... Then... Finally" structure reads as AI. The second (`human_3`)
+  reached "human", but only just (0.3451). I reported both results as they
+  came out instead of tuning the system until my tests passed.
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
