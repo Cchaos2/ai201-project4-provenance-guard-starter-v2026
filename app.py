@@ -30,8 +30,12 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import detector
 
 app = Flask(__name__)
+
+# Longest text /submit accepts (see the endpoint contract in README.md).
+MAX_TEXT_CHARS = 20_000
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -199,14 +203,71 @@ def submit():
     what should this do when `text` is missing, empty, or enormous? A crash on
     a malformed input is one of the most common real failures there is.
     """
-    # Step 1 - the route answers, before any logic.
+    # Step 1 - JSON goes in. A body that isn't a JSON object (a bare list or
+    # string) has no .get, so treat it as empty instead of crashing.
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    text = payload.get("text")
+    creator_id = payload.get("creator_id") or "unknown"
+
+    # Step 2 - check the input before anything expensive runs.
+    if not isinstance(text, str) or not text.strip():
+        audit.log_rejection(creator_id=str(creator_id), reason="missing_text")
+        return jsonify({
+            "error": "bad_request",
+            "message": 'Send JSON with a non-empty "text" field.',
+        }), 400
+
+    if len(text) > MAX_TEXT_CHARS:
+        audit.log_rejection(creator_id=str(creator_id), reason="text_too_long",
+                            text_length=len(text))
+        return jsonify({
+            "error": "text_too_long",
+            "message": f"Text is limited to {MAX_TEXT_CHARS:,} characters.",
+        }), 413
+
+    # Step 3 - signal one, tested from the terminal first.
+    try:
+        model_score = detector.model_signal(text)
+    except ValueError:
+        # detector.perplexity raises this on fewer than 3 tokens.
+        audit.log_rejection(creator_id=str(creator_id), reason="text_too_short")
+        return jsonify({
+            "error": "text_too_short",
+            "message": "This is too short to judge. Please submit at least a few sentences.",
+        }), 422
+    except detector.DetectorUnavailable as exc:
+        return jsonify({"error": "detector_unavailable", "message": str(exc)}), 503
+
+    # Placeholders until Milestones 4 and 5.
+    style_score = None          # Milestone 4: stylometry.style_signal(text)
+    confidence = None           # Milestone 4: scoring.combine_signals(...)
+    guess = "unsure"            # Milestone 5: scoring.score_to_label(...)
+    label = "Label not built yet (Milestone 5)."
+
+    # Step 4 - log the decision. The content_id is what /appeal needs later.
+    content_id = f"c_{uuid.uuid4().hex[:12]}"
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=guess,
+        model_score=model_score,
+        style_score=style_score,
+        combined_score=confidence,
+        label=label,
+        status="decided",
+    )
+
+    # Step 5 - answer.
     return jsonify({
-        "content_id": "hardcoded",
-        "guess": "unsure",
-        "confidence": 0.5,
-        "label": "not built yet",
-        "model_score": None,
-        "style_score": None,
+        "content_id": content_id,
+        "guess": guess,
+        "confidence": confidence,
+        "label": label,
+        "model_score": model_score,
+        "style_score": style_score,
+        "status": "decided",
     }), 200
 
 

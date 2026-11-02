@@ -1,0 +1,4 @@
+{"timestamp": "2026-11-02T01:17:59+00:00", "content_id": "c_892ba737ea9f", "creator_id": "carlos", "guess": "unsure", "model_score": 0.4388, "style_score": null, "combined_score": null, "label": "Label not built yet (Milestone 5).", "status": "decided"}
+{"timestamp": "2026-11-02T01:18:15+00:00", "creator_id": "carlos", "event": "rejected", "status": "rejected", "reason": "missing_text"}
+{"timestamp": "2026-11-02T01:18:19+00:00", "creator_id": "carlos", "event": "rejected", "status": "rejected", "reason": "missing_text"}
+{"timestamp": "2026-11-02T01:18:23+00:00", "creator_id": "carlos", "event": "rejected", "status": "rejected", "reason": "missing_text"}

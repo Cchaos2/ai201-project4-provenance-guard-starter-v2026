@@ -317,12 +317,24 @@ splitting sentences moves signal two but barely moves signal one.
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text": "Time management matters more than people admit, especially now that work moves as fast as it does. If you are organised you hit deadlines, and you are less frazzled doing it. A few things actually help.", "creator_id": "carlos"}'
 ```
 
 ```json
-
+{
+  "confidence": null,
+  "content_id": "c_892ba737ea9f",
+  "guess": "unsure",
+  "label": "Label not built yet (Milestone 5).",
+  "model_score": 0.4388,
+  "status": "decided",
+  "style_score": null
+}
 ```
+
+*Milestone 3 checkpoint: one signal wired in. `style_score`, `confidence`
+and `label` are placeholders until Milestones 4 and 5; this run is replaced
+with the final version at the end.*
 
 **An appeal**
 
@@ -339,12 +351,52 @@ $ curl -X POST http://127.0.0.1:5000/appeal \
 **What the log shows afterwards**
 
 ```bash
-$ curl "http://127.0.0.1:5000/log?limit=3"
+$ curl "http://127.0.0.1:5000/log?limit=5"
 ```
 
 ```json
-
+{
+  "count": 4,
+  "entries": [
+    {
+      "combined_score": null,
+      "content_id": "c_892ba737ea9f",
+      "creator_id": "carlos",
+      "guess": "unsure",
+      "label": "Label not built yet (Milestone 5).",
+      "model_score": 0.4388,
+      "status": "decided",
+      "style_score": null,
+      "timestamp": "2026-11-02T01:17:59+00:00"
+    },
+    {
+      "creator_id": "carlos",
+      "event": "rejected",
+      "reason": "missing_text",
+      "status": "rejected",
+      "timestamp": "2026-11-02T01:18:15+00:00"
+    },
+    {
+      "creator_id": "carlos",
+      "event": "rejected",
+      "reason": "missing_text",
+      "status": "rejected",
+      "timestamp": "2026-11-02T01:18:19+00:00"
+    },
+    {
+      "creator_id": "carlos",
+      "event": "rejected",
+      "reason": "missing_text",
+      "status": "rejected",
+      "timestamp": "2026-11-02T01:18:23+00:00"
+    }
+  ]
+}
 ```
+
+*The three `rejected` entries are bad-input requests (`text` empty, `text`
+missing, `text: null`). Each got a `400` with a readable message, and the
+service kept running.*
 
 ---
 
