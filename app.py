@@ -31,6 +31,8 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import scoring
+import stylometry
 
 app = Flask(__name__)
 
@@ -241,8 +243,8 @@ def submit():
         return jsonify({"error": "detector_unavailable", "message": str(exc)}), 503
 
     # Placeholders until Milestones 4 and 5.
-    style_score = None          # Milestone 4: stylometry.style_signal(text)
-    confidence = None           # Milestone 4: scoring.combine_signals(...)
+    style_score = stylometry.style_signal(text)
+    confidence = scoring.combine_signals(model_score, style_score)
     guess = "unsure"            # Milestone 5: scoring.score_to_label(...)
     label = "Label not built yet (Milestone 5)."
 

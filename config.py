@@ -54,8 +54,14 @@ DETECTOR_MAX_TOKENS = 400
 # down BEFORE you code it, and to put the numbers in your README. Whatever you
 # decide, it goes here.
 
-WEIGHT_MODEL_SIGNAL = 0.5
-WEIGHT_STYLE_SIGNAL = 0.5
+WEIGHT_MODEL_SIGNAL = 0.6
+WEIGHT_STYLE_SIGNAL = 0.4
+
+# When the two signals point opposite ways (one above 0.5, one below) AND are
+# at least this far apart, the combined score is pulled toward 0.5 by this
+# factor (0.5 = halfway back to "coin flip").
+DISAGREEMENT_GAP = 0.35
+DISAGREEMENT_SHRINK = 0.5
 
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
@@ -72,7 +78,7 @@ WEIGHT_STYLE_SIGNAL = 0.5
 # that decide who pays for it.
 
 HUMAN_THRESHOLD = 0.35
-AI_THRESHOLD = 0.65
+AI_THRESHOLD = 0.70
 
 # ⚠️ One thing that catches people out in Milestone 5. A weighted average can
 # only land between its two inputs — so while `style_signal` is still the stub

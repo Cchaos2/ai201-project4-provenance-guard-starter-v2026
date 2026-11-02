@@ -226,19 +226,26 @@ output, and anything after the first ~400 tokens is invisible to it.
 ### Signal two — the style signal
 
 **What it measures:** The shape of the text, without understanding any of
-it. Three measures, each scaled to 0–1 and pointed so that higher means "more
-AI", then averaged into `style_score`:
+it (`stylometry.py::style_signal`). Two measures are scored, each mapped to
+0–1 with higher meaning "more AI":
 - **Sentence-length spread:** the standard deviation of sentence lengths
-  divided by their mean. *Low* spread (sentences marching in step) means more
-  AI-like.
-- **Type-token ratio:** unique words divided by total words. *Low* variety
-  (repeated vocabulary) means more AI-like.
+  divided by their mean. A spread of 0.2 or less scores 1.0 (sentences march
+  in step); 1.0 or more scores 0.0 (lumpy); linear in between.
 - **Punctuation density:** commas, semicolons, colons, dashes, parentheses,
-  quotes, `!` and `?` per word. *Low* density (plain, uniform punctuation)
-  means more AI-like.
+  quotes, `!` and `?` per word. Zero scores 1.0 (plain); 0.12 or more scores
+  0.0; linear in between.
 
-A text with fewer than two sentences has no spread to measure, so that measure
-returns a neutral 0.5 instead of crashing.
+The two are averaged. Two safety rules: with fewer than 3 sentences, spread
+counts as a neutral 0.5; and the result is pulled toward 0.5 for short text,
+`style = 0.5 + (raw − 0.5) × min(1, words / 100)`, because a few sentences
+can't be measured reliably.
+
+**A measure I dropped:** type-token ratio (unique words ÷ total words) is
+still computed and printed, but has weight 0. On my samples it pointed the
+wrong way: the clearly-AI text scored 0.848 and the clearly-human text
+0.734, because generated prose avoids repeating words while people repeat
+names and small words. It also falls as text gets longer, so length alone
+moves it.
 
 **Why that might differ between human and AI writing:** Generated prose tends
 toward even, mid-length sentences, a safe band of vocabulary and tidy
@@ -265,16 +272,73 @@ splitting sentences moves signal two but barely moves signal one.
 <!-- Write the rule in words, then give the numbers. What happens when the two
      signals disagree? -->
 
-**The rule:**
+**The rule:** A weighted average that leans on the model signal, plus one
+rule for real disagreement. If the two signals point **opposite ways** (one
+above 0.5, the other below) **and** are at least 0.35 apart, the result is
+pulled halfway back toward 0.5, because two methods contradicting each other
+is uncertainty and shouldn't produce a confident label. Two signals on the
+same side are not a split, however far apart.
 
-**The numbers:**
+**The numbers** (all in `config.py`):
+- `confidence = 0.6 × model_score + 0.4 × style_score`
+- If the signals are on opposite sides of 0.5 and differ by ≥ 0.35:
+  `confidence = 0.5 + (confidence − 0.5) × 0.5`
+- Thresholds: human below **0.35**, unsure from 0.35 to 0.70, AI above
+  **0.70** (raised from the starter's 0.65 because of the false-positive
+  trace above).
+
+The model signal gets more weight because the style signal is the cheaper
+one to fool on purpose (typos and sentence-chopping move it in seconds) and
+is unreliable on short text.
 
 **Where it lives:** `scoring.py::combine_signals`
 
 <!-- ⚠️ The grader checks your code against that line. If your rule lives
      somewhere else, say where. -->
 
-**A case where my two signals split, and what my rule does with it:**
+**A case where my two signals split, and what my rule does with it:** the
+clearly-human sample. Signal one only half-recognized it as human
+(`model_score` 0.4445, which alone would land in "unsure"), while signal two
+was sure (`style_score` 0.0417: very uneven sentence lengths and lots of
+dashes, commas and quotes). My first version of the disagreement rule
+triggered on any gap of 0.35 or more, so it pulled this text from 0.2834 to
+0.3917, "unsure", even though both signals said human. I changed the rule to
+trigger only when the signals point **opposite ways**. Now the text scores
+0.2834, "human". A true split, like `model_score` 0.85 with `style_score`
+0.30, is still pulled from 0.63 to 0.565: "unsure", not "AI".
+
+**Calibration run** (`python calibrate.py`, which runs both signals directly
+on six chosen inputs):
+
+```
+input                  model   style  combined  guess
+--------------------------------------------------------
+clearly AI            0.7544  0.6708    0.7210  ai
+clearly human         0.4445  0.0417    0.2834  human
+formal human          0.6080  0.5634    0.5902  unsure
+lightly-edited AI     0.6999  0.5595    0.6437  unsure
+borderline            0.3489  0.4740    0.3989  unsure
+plain human (Ana)     0.5820  0.6650    0.6152  unsure
+```
+
+*Formal human* is the abstract of a 2017 journal paper. *Lightly-edited AI*
+is the clearly-AI text with contractions, a dash, and some sentences
+shortened or merged by hand.
+
+**What it shows:**
+- Clearly-AI and clearly-human text score **0.44 apart** (0.7210 vs 0.2834),
+  so the combined score carries real information.
+- **No human text was called AI.** The formal abstract (0.5902) and Ana's
+  plain writing (0.6152) both land in "unsure". Both lean AI on *both*
+  signals, which is exactly the plain/formal-writing blind spot named above;
+  the 0.70 threshold is what keeps them from being accused.
+- **Light editing was enough to move AI text out of the "AI" label** (0.7210
+  to 0.6437). That is the trade I chose: some AI text gets through as
+  "unsure" so that real writers aren't wrongly accused. It is also the
+  attack I expect Unit 8 to use.
+- The clearly-AI text clears the AI threshold by only 0.021, so the "AI"
+  label is hard to reach. Milestone 5 has to confirm it is reachable more
+  than once.
 
 
 

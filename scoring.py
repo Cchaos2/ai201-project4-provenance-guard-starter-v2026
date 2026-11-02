@@ -52,11 +52,21 @@ def combine_signals(model_score: float, style_score: float) -> float:
     The weights in config.py are placeholders. Change them, or ignore them and
     write a different rule.
     """
-    # TODO: replace this
-    return (
+    base = (
         config.WEIGHT_MODEL_SIGNAL * model_score
         + config.WEIGHT_STYLE_SIGNAL * style_score
     )
+
+    # Two methods pointing in OPPOSITE directions is uncertainty: one says
+    # "AI" (above 0.5), the other says "human" (below 0.5), and they are far
+    # apart. Pull the score halfway back toward 0.5, so a split can't produce
+    # a confident label on its own. Two signals on the same side are not a
+    # split, however far apart.
+    opposite_sides = (model_score - 0.5) * (style_score - 0.5) < 0
+    if opposite_sides and abs(model_score - style_score) >= config.DISAGREEMENT_GAP:
+        base = 0.5 + (base - 0.5) * config.DISAGREEMENT_SHRINK
+
+    return round(min(max(base, 0.0), 1.0), 4)
 
 
 def score_to_label(score: float) -> tuple[str, str]:
