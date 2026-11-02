@@ -42,62 +42,99 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. My own writing is rarely called AI
 
 <!-- Your criterion. It must name a number. -->
-
+Of 10 pieces of writing I wrote myself (each at least 100 words, sent to
+`POST /submit`), at most 1 comes back with `guess: "ai"` (the high-confidence
+AI label), in each of 3 trials.
 
 
 **Why this target:**
+On a writing site, wrongly accusing a real writer costs
+far more than letting some AI text through, so I accept missed detections to
+keep false accusations rare. This is a real risk, not a theoretical one:
+signal one already scored a plain paragraph I wrote in a second-language
+style at 0.582, leaning AI just because the words were common. One in ten is
+the most I would accept if it were my own work being judged.
 
 
 
 ---
 
-## 2.
+## 2.Clearly-AI and clearly-human text score far apart
 
 <!-- Your criterion. -->
-
+Across 5 clearly AI-generated texts (produced by a chatbot from a one-line
+prompt, not edited) and 5 clearly human texts (my own writing, or writing
+published before 2022), the average `confidence` of the AI set is at least
+0.30 higher than the average of the human set, in each of 3 trials.
 
 
 **Why this target:**
-
+If the two groups score close together, the confidence
+number carries no real information and every label is basically a guess.
+A gap of 0.30 is the width of the starter's unsure band (0.35 to 0.65), so
+anything smaller means typical AI and human texts could land on the same side
+of my thresholds.
 
 
 ---
 
-## 3.
+## 3. Every label is reachable
 
 <!-- Your criterion. -->
-
+For each of the three labels (`human`, `unsure`, `ai`), I can submit at least
+2 different texts that receive that label, and I record those inputs and
+their responses in the README, in each of 3 trials.
 
 
 **Why this target:**
-
+A label that can never appear is dead code. If "unsure"
+can't be reached, the system pretends to be certain when it isn't; if "human"
+can't be reached, every writer is treated as a suspect. This is a real risk
+here: while the style signal returns a fixed 0.5, a weighted average can't go
+below 0.25, so the human label is close to unreachable.
 
 
 ---
 
-## 4.
+## 4. A valid appeal always changes status and is always recorded
 
 <!-- Your criterion. -->
-
+For 5 out of 5 appeals sent to `POST /appeal` with a `content_id` returned by
+an earlier `POST /submit`, the response is `200` with `status:
+"under_review"`, and `GET /log` shows a new appeal entry for that content_id
+containing the writer's reasoning, while the original `decided` entry is
+still there unchanged.
 
 
 **Why this target:**
-
+The appeal is the only recourse for a writer who was
+wrongly flagged, like the second-language writer in my false-positive trace.
+If it ever fails silently, that person has no way to be heard. This part of
+the system is plain code with no model involved, so 100% is the honest
+target, not an easy one.
 
 
 ---
 
-## 5.
+## 5. Bad input gets a clear error, never a crash
 
 <!-- Your criterion. -->
-
+Four malformed `POST /submit` requests (`text` missing, `text` empty `""`,
+`text` only whitespace, and `text: null`) each return a `400` with a JSON body
+containing an `error` field and a readable `message`. After all four,
+`POST /ping` still returns `200`. This holds in 4 of 4 cases, in each of 3
+trials.
 
 
 **Why this target:**
-
+Scoring empty text would either crash the service (the
+detector raises an error on fewer than 3 tokens) or produce a meaningless
+confidence that could still be shown to a reader as a judgment about a
+person. A crash on malformed input is one of the most common real failures,
+and it should never take the service down for other writers.
 
 
 ---
