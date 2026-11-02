@@ -245,8 +245,8 @@ def submit():
     # Placeholders until Milestones 4 and 5.
     style_score = stylometry.style_signal(text)
     confidence = scoring.combine_signals(model_score, style_score)
-    guess = "unsure"            # Milestone 5: scoring.score_to_label(...)
-    label = "Label not built yet (Milestone 5)."
+    # Milestone 5 - the number becomes words a person can read.
+    guess, label = scoring.score_to_label(confidence)
 
     # Step 4 - log the decision. The content_id is what /appeal needs later.
     content_id = f"c_{uuid.uuid4().hex[:12]}"
@@ -293,14 +293,52 @@ def appeal():
     to the person on the other end. It's the only thing standing between a
     wrong accusation and nothing at all.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
 
-    # TODO: delete this and build the route.
+    # 1. Both fields are required.
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({
+            "error": "bad_request",
+            "message": 'Send JSON with the "content_id" you were given.',
+        }), 400
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({
+            "error": "bad_request",
+            "message": 'Send JSON with a non-empty "reasoning" explaining why.',
+        }), 400
+    content_id = content_id.strip()
+
+    # 2. The content_id must belong to a real decision. A typo here would
+    #    otherwise fail silently, so it gets a clear 404 and nothing is logged.
+    decisions = [e for e in audit.entries_for(content_id) if e.get("status") == "decided"]
+    if not decisions:
+        return jsonify({
+            "error": "not_found",
+            "message": f"We couldn't find a submission with id {content_id}.",
+        }), 404
+
+    # 3. Record the appeal next to the original decision. The log is
+    #    append-only: the original entry stays exactly as it was.
+    audit.log_appeal(
+        content_id=content_id,
+        creator_id=decisions[0].get("creator_id", "unknown"),
+        reasoning=reasoning.strip(),
+    )
+
+    # 4. Confirm to the writer.
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id,
+        "status": "under_review",
+        "message": (
+            "Thanks, we've received your appeal. A person will review this "
+            "decision, and the automated result won't be treated as final in "
+            "the meantime."
+        ),
+    }), 200
 
 
 # ── Already works ─────────────────────────────────────────────────────────────
