@@ -157,7 +157,7 @@ def health():
 # ── YOU BUILD THIS ────────────────────────────────────────────────────────────
 
 @app.post("/submit")
-# @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+@limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
@@ -240,6 +240,7 @@ def submit():
             "message": "This is too short to judge. Please submit at least a few sentences.",
         }), 422
     except detector.DetectorUnavailable as exc:
+        audit.log_rejection(creator_id=str(creator_id), reason="detector_unavailable")
         return jsonify({"error": "detector_unavailable", "message": str(exc)}), 503
 
     # Placeholders until Milestones 4 and 5.
@@ -259,6 +260,9 @@ def submit():
         combined_score=confidence,
         label=label,
         status="decided",
+        text_length=len(text),
+        weights={"model": config.WEIGHT_MODEL_SIGNAL, "style": config.WEIGHT_STYLE_SIGNAL},
+        thresholds={"human": config.HUMAN_THRESHOLD, "ai": config.AI_THRESHOLD},
     )
 
     # Step 5 - answer.

@@ -599,27 +599,50 @@ changed the project.
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 5 per minute, 50 per day (`config.py`: `RATE_LIMIT_PER_MINUTE`,
+`RATE_LIMIT_PER_DAY`), applied to `POST /submit` by the `@limiter.limit`
+decorator in `app.py`.
 
 **Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
+A real writer submits a piece, reads the label, maybe edits and resubmits,
+which is one submission every few minutes at most. Five a minute leaves room
+for a quick burst of resubmissions without ever blocking a person. A script
+trying to map my thresholds needs hundreds of near-identical variations to find
+where 0.35 and 0.70 sit. Five a minute slows it badly, and every request also
+costs a second or two of GPT-2 time on this machine, so an unlimited flood would
+slow the service down for every other writer. The daily cap closes the gap the
+minute limit leaves: a script pacing itself at exactly 5 a minute would still
+get 7,200 probes a day, but with 50 a day it gets 50, far too few to map a
+threshold. Fifty is still well above what a writer revising all day would send.
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+**What a caller counts as:** the `creator_id` in the request body
+(`app.py::rate_limit_key`), falling back to the caller's IP address when
+`creator_id` is missing or not a string. This fails in a known way: a script
+that invents a new `creator_id` for every request looks like a thousand
+different writers and is never limited. Per-address limits would fail the other
+way: a whole school behind one address would share a single budget. Counts are
+kept in memory, so restarting the service resets them.
 
-**The run of status codes when I pushed past it:**
-
-<!-- python run_attacks.py --flood 15 -->
+**The run of status codes when I pushed past it** (`python run_attacks.py
+--flood 15`, saved in `results/flood_2026-11-11_1714.md`):
 
 ```
-
+200 200 200 200 200 429 429 429 429 429 429 429 429 429 429
 ```
 
----
+Every 429 left a trace in `logs/audit.jsonl` (10 entries like this one), so a
+flood shows up in the log instead of looking like a quiet afternoon:
+
+```json
+{"timestamp": "2026-11-11T22:14:48+00:00", "creator_id": "flood_tester", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute"}
+```
+
+**Audit log changes in this unit:** decision entries already carried the nine
+required fields. I added three extra fields to each decision (`text_length`,
+`weights`, `thresholds`) so an entry can be read without my code, and so
+entries from before and after my Milestone 5 change show which settings
+produced them. The route now also logs the one refusal it didn't before: a
+`503` when the detector model can't load.
 
 ## Attack Run — Before
 
