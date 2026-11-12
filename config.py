@@ -78,7 +78,7 @@ DISAGREEMENT_SHRINK = 0.5
 # that decide who pays for it.
 
 HUMAN_THRESHOLD = 0.35
-AI_THRESHOLD = 0.70
+AI_THRESHOLD = 0.85   # Unit 8 M5: was 0.70. Six real writers in the attack set scored 0.735-0.823.
 
 # ⚠️ One thing that catches people out in Milestone 5. A weighted average can
 # only land between its two inputs — so while `style_signal` is still the stub
