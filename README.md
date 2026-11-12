@@ -557,6 +557,8 @@ Content-Type: application/json
 I used Claude throughout as a reviewer and pair-programmer. Two moments
 changed the project.
 
+### Unit 7
+
 **Moment 1: a 403 that wasn't my code**
 
 - *What I asked for:* my first hardcoded `/submit` seemed to return nothing.
@@ -592,6 +594,34 @@ changed the project.
   "First... Then... Finally" structure reads as AI. The second (`human_3`)
   reached "human", but only just (0.3451). I reported both results as they
   came out instead of tuning the system until my tests passed.
+
+### Unit 8
+
+**Moment 1: the typo attack didn't hit the signal it targeted**
+
+- *What I asked for:* help diagnosing EV01, which the attack set labelled
+  "signal two: typos raise word variety", the same mechanism as the brief's
+  example.
+- *What came back:* Claude recomputed my style signal exactly and showed it
+  didn't move at all (0.8000 before and after), because my word-variety
+  measure has weight 0. The typos hit signal one instead: GPT-2 splits
+  misspelt words into rare pieces, and perplexity jumped from 29 to 125.
+- *What I changed:* I wrote the diagnosis from my own numbers instead of
+  copying the brief's mechanism, which would have been wrong for my system.
+
+**Moment 2: a 429 that hid two attacks**
+
+- *What I asked for:* why RQ10 and RQ11 came back `429` when they weren't
+  flood attacks.
+- *What came back:* requests with no usable `creator_id` are counted
+  against my IP address, and five earlier malformed rows had used up that
+  bucket's 5 per minute, so those two never reached my route.
+- *What I changed:* I kept the 429 as the honest result, then re-sent each
+  one alone a minute later (both got `400`), and gave every bad-input body
+  in `scenarios.py` its own `creator_id`, so the limiter couldn't answer
+  instead of my route in criterion 5.
+
+
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
@@ -1660,17 +1690,67 @@ pays, by catching almost no AI text.
 
 ## What's Still Broken
 
-<!-- For each attack still getting through and each criterion still missed:
-     what you'd do, and why you stopped. -->
+After my one change, 17 of 56 attacks still break and criteria 2 and 3 are
+missed. Grouped by the problem behind them (numbered as in my diagnoses):
 
+**MF03, MF04, MF05, MF06, RQ06: non-writing gets a label, and a bad
+`creator_id` gets into the log (Problem 4).**
+*What I'd do:* validate the input in `app.py::submit` before any signal runs.
+Count real words with a Unicode-aware pattern and return `422` ("we can't
+judge this as writing") below about 20 words. Return `422` for non-Latin
+script ("we can only check English text") instead of scoring it as AI or
+human. Return `400` when `creator_id` isn't a short string.
+*Why I stopped:* the rule for this unit was one change. This is the next fix
+I'd make, because it has no trade-off: it only refuses input that was never
+writing. I chose the threshold first because a wrong accusation of a real
+person is worse than a label on emoji.
 
+**EV08, PI01, PI02, PI03: short text is decided by signal one almost alone
+(Problem 3).**
+*What I'd do:* raise the route's minimum from "3 GPT-2 tokens" to about 50
+words and return a clear "too short to judge" `422`. The cost: short genuine
+posts like FP08 would get no label at all instead of "unsure", which I think
+is more honest.
+*Why I stopped:* one change. This is my second-next fix.
+
+**EV01–EV07, EV09: AI text escapes with small edits (Problem 2), and
+criterion 3's AI label is now unreachable.**
+*What I'd do:* nothing more with thresholds. My own numbers show real formal
+writing (0.735–0.823) and real AI writing (0.72–0.83) land in the same range,
+so any line accuses writers or misses AI text. The real fix is a better
+signal one: score the text with two language models and compare them, rather
+than raw GPT-2 perplexity, which rewards plain, predictable writing whoever
+wrote it.
+*What I would not fix:* the signal-two evasions (EV02, EV03, EV06, EV07,
+EV09) one by one. I could cap one-word sentences or spot repeated filler
+like "; and, moreover,", but each patch fits one attack, and a signal that
+only measures shape will always lose to a shape edit that takes seconds.
+EV05 I wouldn't try to catch at all: it was rewritten by a person almost
+sentence by sentence, so calling it human is close to correct.
+*Why I stopped:* a new signal is a rebuild, not one measured change, and it's
+outside this unit's scope.
+
+**Criterion 2 (gap 0.141 against 0.30): still missed.**
+*What I'd do:* the same signal-one rebuild, because no threshold or weight
+can separate scores that overlap; the gap is in the signals. I'd also add
+non-academic writing of mine to the human set, since all ten pieces are the
+formal register my detector is weakest on.
+*Why I stopped:* the fix is the same rebuild as above.
+
+**Criterion 3 (AI label reached by 0 of 2 texts): missed because of my
+change.**
+*What I'd do:* accept it for now. Bringing the line back to 0.70 brings back
+the six accusations. The AI label should return only when a better signal
+pushes AI text clearly above where human writing lands.
+*Why I stopped:* this is the cost I chose, on purpose.
 
 **The trade I'd make if this ran for real:**
 
-<!-- Two sentences. Fewer wrong accusations means more AI text getting through.
-     Say which way you'd go and WHO PAYS FOR IT. -->
-
-
+I would keep the AI threshold high, as I set it, so that real writers are not
+accused, and accept that most AI text comes back "unsure". The site and its
+honest writers pay for that, because AI text goes unflagged; but that cost is
+spread thin, while a false accusation lands entirely on one person, usually
+the plain or second-language writer with the least room to argue back.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
