@@ -8,6 +8,66 @@ assumed — the starter ships one that already answers.
 
 ---
 
+## Capstone run path (unit 9): Path B, local with logs
+
+This is how the service runs for the capstone. It is not hosted: "This project
+will not fit a free host", further down, has the arithmetic. The gunicorn
+command in that section is the starter's general note about hosts; the one
+here is the one I use.
+
+### What the environment needs
+
+| Thing | What |
+|---|---|
+| Operating system | macOS or Linux. gunicorn does not run on Windows: there, use WSL, or start with `python app.py` instead (same app, same logs, Flask's development server) |
+| Python | 3.11, 3.12 or 3.13, not 3.14. I ran it on 3.X.Y |
+| Dependencies | `requirements.txt`, every package pinned with a lower and an upper bound: Flask, Flask-Limiter, requests, transformers, torch, gunicorn, certifi |
+| Model file | `gpt2` from Hugging Face, about 550 MB, downloaded once by `python detector.py` into `~/.cache/huggingface/hub/` |
+| Keys and accounts | None. Nothing here calls a hosted service |
+
+### One-time setup, from a clean clone
+
+```bash
+git clone https://github.com/Cchaos2/ai201-project4-provenance-guard-starter-v2026.git
+cd ai201-project4-provenance-guard-starter-v2026
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python detector.py        # downloads gpt2 the first time, then scores a sample
+```
+
+### The start command
+
+```bash
+gunicorn app:app --bind 127.0.0.1:5000 --workers 1 --timeout 120
+```
+
+| Flag | Why |
+|---|---|
+| `--bind 127.0.0.1:5000` | The same address as before, so every `curl` in this file still works |
+| `--workers 1` | Each worker loads its own copy of GPT-2 and keeps its own rate-limit counts in memory. Two workers would double the memory and give every caller twice the limit |
+| `--timeout 120` | gunicorn restarts a worker that is silent for 30 seconds by default. The first submission after a start has to load the model, and on a slow machine that can take longer than 30 seconds |
+
+Stop it with Ctrl-C.
+
+### Check it is up
+
+In a second terminal, with the virtual environment activated:
+
+```bash
+curl -s http://127.0.0.1:5000/health
+curl -s -X POST http://127.0.0.1:5000/submit -H "Content-Type: application/json" -d @samples/unsure_2.json
+```
+
+### Where the record goes
+
+Every request writes one line to `logs/requests.jsonl` (what came in, what went
+back, the status and how long it took). `python request_log.py` prints the last
+ten. Decisions, appeals and rejections also go to `logs/audit.jsonl`, as before.
+`python measure_cost.py` sends ten submissions and reports what one costs.
+
+---
+
 ## Before your first class
 
 ```bash
