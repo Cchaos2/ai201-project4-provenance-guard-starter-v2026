@@ -105,6 +105,7 @@ position.**
 | `python run_attacks.py --set <folder>` | The attack set — **unit 8** |
 | `python run_attacks.py --flood 15` | Push past your rate limit and print the status codes — **unit 8** |
 | `python run_eval.py --label before` | Your five criteria, three trials — **unit 8** |
+| `python request_log.py` | Prints the last ten request-log records — **unit 9** |
 
 ---
 
@@ -250,6 +251,8 @@ your write-up; that's the deliverable.
 | `criteria.md` | Your five criteria. **You write all five** |
 | `logs/audit.jsonl` | Your audit log. **Commit it** |
 | `results/` | Attack runs and run logs. **Commit them** |
+| `request_log.py` | The request log writer. One record per HTTP request — **unit 9** |
+| `logs/requests.jsonl` | Your request log. **Commit it** |
 
 ---
 
