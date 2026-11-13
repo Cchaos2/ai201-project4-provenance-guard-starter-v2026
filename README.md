@@ -1788,3 +1788,35 @@ the plain or second-language writer with the least room to argue back.
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Capstone
+
+**What This Extends**
+
+This extends Provenance Guard, my Unit 7 and Unit 8 project: the Flask service
+that takes a piece of writing at `POST /submit`, scores it with two signals
+(GPT-2 perplexity and a style measure), and answers with a label a writer can
+appeal. Until now it only ran from `python app.py` on Flask's development
+server, and its audit log recorded decisions but not how long anything took.
+What's new in this unit: a request log (`logs/requests.jsonl`) that records
+every HTTP request with its duration, a run path under gunicorn started by one
+documented command, and a measured cost per submission.
+
+**The Shape**
+
+Shape A: deploy and instrument. I'm adding the operational layer and nothing
+else. One hook in `app.py` writes one structured record per request, on every
+route and for every outcome (a decision, a `400`, a `429`, or an error):
+timestamp, route, what came in, status code, what came out, and duration in
+milliseconds. The service runs under gunicorn from a single command in
+`RUNNING.md` (Path B, local with logs), and the cost of one run comes from the
+logged durations. The existing audit log, `logs/audit.jsonl`, stays exactly as
+it is.
+
+Out of scope: I'm not adding the input validation that my Unit 8 "What's Still
+Broken" names as the next fix (a minimum word count, non-Latin script, a bad
+`creator_id`). I'm not touching the signals, weights or thresholds, so every
+label comes out the same as in Unit 8. And I'm not hosting it, because torch
+plus the GPT-2 weights don't fit in a free tier's 512 MB.
