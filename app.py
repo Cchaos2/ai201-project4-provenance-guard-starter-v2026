@@ -24,13 +24,15 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import time
 import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, got_request_exception, jsonify, request
 
 import audit
 import config
 import detector
+import request_log
 import scoring
 import stylometry
 
@@ -38,6 +40,98 @@ app = Flask(__name__)
 
 # Longest text /submit accepts (see the endpoint contract in README.md).
 MAX_TEXT_CHARS = 20_000
+
+
+# ── Request log — UNIT 9 (capstone) ──────────────────────────────────────────
+# One structured record per HTTP request, written to logs/requests.jsonl by
+# request_log.write(). Every route, every outcome.
+#
+# This block sits ABOVE the rate limiter on purpose. Flask runs before_request
+# functions in the order they were registered, and the limiter refuses a
+# request from inside its own. Registered after it, the timer would never
+# start on a 429.
+
+# The fields worth keeping from a response body. `label` (a paragraph of text)
+# and `entries` (the whole audit log, from GET /log) are left out.
+_OUTPUT_FIELDS = (
+    "content_id", "guess", "confidence", "model_score", "style_score",
+    "status", "error", "message", "limit", "count", "ok",
+)
+
+
+def _short(value):
+    """A value small enough to sit on one log line."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= 80 else value[:80] + "..."
+    return f"<{type(value).__name__}>"
+
+
+def _input_summary() -> dict:
+    """What came in: enough to recognise the request, never the full text."""
+    if request.method == "GET":
+        return {key: _short(value) for key, value in request.args.items()}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return {"body": "not_a_json_object", "bytes": request.content_length or 0}
+    summary = {}
+    for key, value in list(payload.items())[:10]:
+        if key in ("text", "reasoning") and isinstance(value, str):
+            summary[f"{key}_length"] = len(value)
+            summary[f"{key}_preview"] = value[:80]
+        else:
+            summary[str(key)[:40]] = _short(value)
+    return summary
+
+
+def _output_summary(response) -> dict:
+    """What went back: the fields that say what the service answered."""
+    body = response.get_json(silent=True) if response.is_json else None
+    if not isinstance(body, dict):
+        return {"body": "not_json"}
+    return {key: _short(body[key]) for key in _OUTPUT_FIELDS if key in body}
+
+
+@app.before_request
+def _start_request_timer():
+    g.started = time.perf_counter()
+    # Was the model already in memory when this request arrived? If it wasn't,
+    # this request is the one that has to load it.
+    g.detector_loaded = detector._model is not None
+
+
+def _note_exception(sender, exception, **extra):
+    """An unhandled crash becomes a 500. Keep what it was for the record."""
+    g.exception = f"{type(exception).__name__}: {exception}"[:200]
+
+
+got_request_exception.connect(_note_exception, app)
+
+
+@app.after_request
+def _log_request(response):
+    """Write one record per request. Logging must never break a response."""
+    try:
+        started = getattr(g, "started", None)
+        status = response.status_code
+        record = {
+            "method": request.method,
+            "route": request.path[:80],
+            "input": _input_summary(),
+            "status": status,
+            "outcome": "ok" if status < 400 else "rejected" if status < 500 else "error",
+            "output": _output_summary(response),
+            "duration_ms": (round((time.perf_counter() - started) * 1000, 1)
+                            if started is not None else None),
+            "detector_loaded_at_start": getattr(g, "detector_loaded", None),
+        }
+        if getattr(g, "exception", None):
+            record["exception"] = g.exception
+        request_log.write(record)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("request log failed")
+    return response
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
