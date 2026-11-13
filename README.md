@@ -1820,3 +1820,132 @@ Broken" names as the next fix (a minimum word count, non-Latin script, a bad
 `creator_id`). I'm not touching the signals, weights or thresholds, so every
 label comes out the same as in Unit 8. And I'm not hosting it, because torch
 plus the GPT-2 weights don't fit in a free tier's 512 MB.
+
+**Running It**
+
+Path B: local, with logs. Everything needed to start it is in
+[`RUNNING.md`](RUNNING.md) under "Capstone run path": the environment, a
+one-time setup, and one start command:
+
+```bash
+gunicorn app:app --bind 127.0.0.1:5000 --workers 1 --timeout 120
+```
+
+I didn't host it, and the reason is arithmetic. The free tier this course uses
+gives 512 MB of memory. Before this service can score anything it has to hold
+torch (roughly 200 to 800 MB depending on the build) and the GPT-2 weights
+(about 525 MB on my disk) in memory, so it is over the limit before the first
+request arrives. A free host also has no persistent disk, so the 525 MB
+download would start again after every idle spin-down.
+
+I tried to test the instructions from a clean clone. I cloned the repository
+into an empty folder and started the setup from the top, and it stopped at the
+second command: `python3 -m venv .venv` failed on my machine with an
+`ensurepip` error, before anything from the repository was used. I chose not
+to change my Python installation to get past it. So the setup steps are
+untested from a clean checkout. The start command and everything after it ran
+from the environment I already had for this repository (Python 3.13.17).
+
+The committed run record is `logs/requests.jsonl`. Every line in it was written
+by the service running under that command.
+
+**Instrumentation**
+
+`app.py::_log_request` writes one record per HTTP request to
+`logs/requests.jsonl`, on every route and for every outcome. The timer starts
+in `app.py::_start_request_timer`, which is registered before the rate limiter
+so that a `429` is timed too.
+
+| Field | What it holds |
+|---|---|
+| `timestamp` | UTC, to the millisecond, when the response was ready |
+| `method`, `route` | What was called |
+| `input` | What came in: `creator_id`, `text_length` and the first 80 characters of the text (never the full text). For `/appeal`, the `content_id` and the reasoning's length and first 80 characters. For a body that isn't a JSON object, that fact and its size in bytes |
+| `status` | The HTTP status code |
+| `outcome` | `ok` (below 400), `rejected` (4xx) or `error` (5xx) |
+| `output` | What went back: `content_id`, `guess`, `confidence` and both signal scores, or the `error` and its `message` |
+| `duration_ms` | Time inside the service, from the request arriving to the response being ready |
+| `detector_loaded_at_start` | Whether GPT-2 was already in memory when the request arrived |
+| `exception` | Only on a crash (`500`): the exception's type and message |
+
+The whole log from one session under gunicorn, 22 entries:
+
+```json
+{"timestamp": "2026-11-13T03:53:14.276+00:00", "method": "GET", "route": "/health", "input": {}, "status": 200, "outcome": "ok", "output": {"ok": true}, "duration_ms": 1.6, "detector_loaded_at_start": false}
+{"timestamp": "2026-11-13T03:53:21.777+00:00", "method": "POST", "route": "/ping", "input": {"message": "hello"}, "status": 200, "outcome": "ok", "output": {"ok": true}, "duration_ms": 0.2, "detector_loaded_at_start": false}
+{"timestamp": "2026-11-13T03:53:33.968+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_c26c53a28878", "guess": "unsure", "confidence": 0.6152, "model_score": 0.582, "style_score": 0.665, "status": "decided"}, "duration_ms": 3180.3, "detector_loaded_at_start": false}
+{"timestamp": "2026-11-13T03:53:42.996+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "m3_no_text"}, "status": 400, "outcome": "rejected", "output": {"error": "bad_request", "message": "Send JSON with a non-empty \"text\" field."}, "duration_ms": 0.8, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:53:50.841+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 2, "text_preview": "hi", "creator_id": "m3_short"}, "status": 422, "outcome": "rejected", "output": {"error": "text_too_short", "message": "This is too short to judge. Please submit at least a few sentences."}, "duration_ms": 1.0, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:53:58.720+00:00", "method": "POST", "route": "/appeal", "input": {"content_id": "c_doesnotexist", "reasoning_length": 20, "reasoning_preview": "I wrote this myself."}, "status": 404, "outcome": "rejected", "output": {"error": "not_found", "message": "We couldn't find a submission with id c_doesnotexist."}, "duration_ms": 1.5, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.791+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_2c53cb61c84e", "guess": "unsure", "confidence": 0.6152, "model_score": 0.582, "style_score": 0.665, "status": "decided"}, "duration_ms": 33.2, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.828+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_f54c2bab93e4", "guess": "unsure", "confidence": 0.6152, "model_score": 0.582, "style_score": 0.665, "status": "decided"}, "duration_ms": 25.9, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.864+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_19fe7b32bb6c", "guess": "unsure", "confidence": 0.6152, "model_score": 0.582, "style_score": 0.665, "status": "decided"}, "duration_ms": 24.6, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.900+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_6791b6401783", "guess": "unsure", "confidence": 0.6152, "model_score": 0.582, "style_score": 0.665, "status": "decided"}, "duration_ms": 26.5, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.911+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 429, "outcome": "rejected", "output": {"error": "rate_limited", "message": "Too many submissions. Try again shortly.", "limit": "5 per 1 minute"}, "duration_ms": 0.5, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:11.921+00:00", "method": "POST", "route": "/submit", "input": {"creator_id": "ana", "text_length": 182, "text_preview": "My first night shift was very hard. I was nervous before it started. The patient"}, "status": 429, "outcome": "rejected", "output": {"error": "rate_limited", "message": "Too many submissions. Try again shortly.", "limit": "5 per 1 minute"}, "duration_ms": 0.3, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:18.976+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1072, "text_preview": "The western part of the United States, like other countries located along the Pa", "creator_id": "cost_225418_1"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_5cb79c27c864", "guess": "unsure", "confidence": 0.6909, "model_score": 0.7426, "style_score": 0.6134, "status": "decided"}, "duration_ms": 49.4, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.010+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 693, "text_preview": "Previous work has been conducted using supervised learning, achieving 64% accura", "creator_id": "cost_225418_2"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_9753270a3c8b", "guess": "unsure", "confidence": 0.6754, "model_score": 0.6478, "style_score": 0.7168, "status": "decided"}, "duration_ms": 31.0, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.048+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 832, "text_preview": "The images were available in three formats: PNG, JPG, and JPEG, and exhibited a ", "creator_id": "cost_225418_3"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_8888220f7739", "guess": "unsure", "confidence": 0.5494, "model_score": 0.7945, "style_score": 0.3052, "status": "decided"}, "duration_ms": 36.0, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.097+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1087, "text_preview": "Data augmentation was employed to improve the robustness and generalization capa", "creator_id": "cost_225418_4"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_f52358f932c1", "guess": "unsure", "confidence": 0.5449, "model_score": 0.7507, "style_score": 0.3483, "status": "decided"}, "duration_ms": 46.8, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.148+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1060, "text_preview": "Several Convolutional Neural Networks (CNNs) were evaluated for the classificati", "creator_id": "cost_225418_5"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_73dad347e2a0", "guess": "unsure", "confidence": 0.5043, "model_score": 0.6363, "style_score": 0.3063, "status": "decided"}, "duration_ms": 48.2, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.183+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 691, "text_preview": "A custom dataset was created, as previously mentioned, to generate pairs of augm", "creator_id": "cost_225418_6"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_156c3c5ce737", "guess": "unsure", "confidence": 0.5431, "model_score": 0.4853, "style_score": 0.6297, "status": "decided"}, "duration_ms": 32.6, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.221+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 879, "text_preview": "Unlike machine learning engineers or data scientists, civil engineers often do n", "creator_id": "cost_225418_7"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_e61e0515965d", "guess": "unsure", "confidence": 0.6961, "model_score": 0.7301, "style_score": 0.6452, "status": "decided"}, "duration_ms": 35.2, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.275+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1343, "text_preview": "The next evaluation focused on comparing different models. Five models were test", "creator_id": "cost_225418_8"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_e4f2ff9acff7", "guess": "unsure", "confidence": 0.5427, "model_score": 0.6774, "style_score": 0.3406, "status": "decided"}, "duration_ms": 51.7, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.331+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1332, "text_preview": "As mentioned earlier, this dataset was originally used in another study, where t", "creator_id": "cost_225418_9"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_623d668e33bb", "guess": "unsure", "confidence": 0.5612, "model_score": 0.6878, "style_score": 0.3713, "status": "decided"}, "duration_ms": 53.9, "detector_loaded_at_start": true}
+{"timestamp": "2026-11-13T03:54:19.373+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1160, "text_preview": "Finally, six semi-supervised learning experiments were performed. The objective ", "creator_id": "cost_225418_10"}, "status": 200, "outcome": "ok", "output": {"content_id": "c_8faca29e1370", "guess": "unsure", "confidence": 0.5833, "model_score": 0.6016, "style_score": 0.5559, "status": "decided"}, "duration_ms": 39.6, "detector_loaded_at_start": true}
+```
+
+Failed runs are in there too: a `400` (no text), a `422` (too short to judge),
+a `404` (an appeal for an id that doesn't exist) and two `429`s from pushing
+one `creator_id` past 5 a minute. No request crashed in this session, so there
+is no `500` entry.
+
+**What It Costs**
+
+One run is one `POST /submit`. Nothing here calls a paid API, so the cost of a
+run is compute time on the machine the service runs on.
+
+**Measured: 42.4 ms of compute per submission**, the average of ten (lowest
+31.0 ms, highest 53.9 ms).
+
+How I measured it: `python measure_cost.py` sent the ten pieces of my own
+writing in `scenarios.py` (102 to 208 words each) to the service running under
+gunicorn, each under its own `creator_id` so the rate limiter didn't answer
+instead of the route. The number for each is the `duration_ms` the service
+logged for that request in `logs/requests.jsonl`, so it is time inside the
+service and leaves out network time.
+
+```
+Cost of one run: 10 submissions to http://127.0.0.1:5000/submit
+Read back from logs/requests.jsonl
+
+creator_id         words status duration_ms  model in memory at start
+cost_225418_1        175    200        49.4  True
+cost_225418_2        102    200        31.0  True
+cost_225418_3        128    200        36.0  True
+cost_225418_4        164    200        46.8  True
+cost_225418_5        153    200        48.2  True
+cost_225418_6        107    200        32.6  True
+cost_225418_7        141    200        35.2  True
+cost_225418_8        208    200        51.7  True
+cost_225418_9        199    200        53.9  True
+cost_225418_10       169    200        39.6  True
+
+mean   42.4 ms   (min 31.0, max 53.9)
+
+100 runs a day x 42.4 ms = 4240 ms = 4.24 s of compute per day
+```
+
+All ten ran with the model already in memory. The first submission after a
+start is different: it has to load the model, and in this session it took
+3,180.3 ms (the first `/submit` entry in the log above, with
+`detector_loaded_at_start: false`). That is about 75 times a normal run, paid
+once per start.
+
+A hundred people a day, one submission each:
+
+    100 runs x 42.4 ms = 4,240 ms = 4.24 s of compute per day
+
+In API spend that is $0. The real cost of keeping this running isn't the
+compute per request, it is the memory: the model has to stay loaded the whole
+time, whether anyone submits or not.
