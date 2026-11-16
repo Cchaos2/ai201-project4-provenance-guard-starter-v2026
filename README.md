@@ -2167,3 +2167,156 @@ The first of the five appeals (the other four have the same shape):
   }
 ]
 ```
+
+
+**Verdicts**
+
+Four MET and one MISSED, against the targets I committed in `criteria.md`
+before any of these runs. No criterion was revised.
+
+- **1. MET.** 20 requests sent, 20 lines gained, 20 complete records, in all
+  three trials.
+- **2. MISSED.** 0 of 3 in every trial. The two halves came out differently:
+  the record half held for all 9 crashes, and the response half failed for all
+  9.
+- **3. MET.** All three checks held in every trial. The first submission after
+  a start took 2,922.7, 1,686.2 and 1,699.9 ms against a limit of 10,000 ms,
+  with `detector_loaded_at_start: false`. The second took 33.6, 31.1 and
+  30.5 ms against a limit of 100 ms, with the flag `true`.
+- **4. MET.** 5 of 5 appeals in every trial.
+- **5. MET.** 4 of 4 malformed requests got a `400` with `error` and
+  `message` in every trial, and `/ping` answered `200` afterwards.
+
+**Diagnosis of the miss: criterion 2**
+
+What happened: across three trials I forced 9 crashes by making
+`logs/audit.jsonl` read-only. Every one left a complete record in
+`logs/requests.jsonl`: `status: 500`, `outcome: "error"`, a `duration_ms`, and
+`exception: "PermissionError: [Errno 13] Permission denied: ..."`. And every
+one sent the client `Content-Type: text/html` with Flask's "500 Internal
+Server Error" page instead of JSON.
+
+Where: the error path in `app.py`, at the step after scoring where `/submit`
+writes the decision. `app.py::submit` calls `audit.log_decision(...)` with no
+`try` around it, and the app had no handler for an exception that leaves a
+route.
+
+How: my `{"error", "message"}` shape is not a property of the service. It is a
+property of each branch I wrote by hand. Every JSON error comes from an
+explicit `return jsonify(...)`: the `400`, `413`, `422` and `503` in
+`submit`, the `404` in `appeal`, and the `429` handler. The read-only audit
+log raised a `PermissionError` inside `audit._append`, which none of those
+branches catches. So the exception left the route, and Flask answered with its
+own default `500`, whose body is an HTML page. My criterion assumed every
+failure passes through my code. This one passed through the framework's.
+
+Why the record half held: `app.py::_log_request` is registered with
+`after_request`, and Flask still runs that on the `500` response it builds
+itself. The exception's name comes from `app.py::_note_exception`, which
+listens for Flask's `got_request_exception` signal, and that fires before the
+response is built.
+
+The pattern: one miss, one cause. The same mechanism should have other
+symptoms that my criteria don't test. An error Flask raises itself, such as a
+`404` for an unknown route or a `405` for a wrong method, doesn't pass through
+my branches either. I haven't measured those, so that is an expectation, not a
+result.
+
+**The Improvement**
+
+What I changed: one handler, `app.py::internal_error`, registered with
+`@app.errorhandler(500)`. When an exception leaves any route, the client now
+gets status `500` with this body:
+
+```json
+{"error": "internal_error", "message": "Something went wrong on our side and the request was not completed. Please try again."}
+```
+
+That is the whole change: 18 lines, in the commit "Capstone M6: answer
+unhandled exceptions with JSON (500 handler)".
+
+Why this change: it follows the diagnosis. The miss was not about the audit
+log. It was that anything I didn't anticipate falls through to the framework's
+default. Wrapping the audit write in its own `try` would have fixed the one
+crash I forced and nothing else. The handler sits where the diagnosis points:
+the place Flask builds a response for whatever no branch caught. So it covers
+the exception I forced and the ones I haven't thought of.
+
+What I did not change: the crash still happens. A read-only audit log still
+ends the request with a `500`, and the writer still gets no decision, because
+a decision that couldn't be recorded shouldn't be shown. The logging hook, the
+criteria and `run_capstone.py` are the same as in the first run.
+
+I ran the full set again the same way: three trials, a restart before each,
+`python run_capstone.py --label after --trial N`. The full output is in
+`results/capstone_after_trial1.md`, `..._trial2.md` and `..._trial3.md`.
+
+**Real output after the fix, from trial 1**
+
+Copied from `results/capstone_after_trial1.md`, produced by
+`run_capstone.py::check_crash`. This is the first forced crash; the other two
+in this trial, and all three in trials 2 and 3, came back the same way.
+
+What the client got:
+
+```
+HTTP 500
+Content-Type: application/json
+
+{"error":"internal_error","message":"Something went wrong on our side and the request was not completed. Please try again."}
+
+```
+
+What the log got:
+
+```json
+{"timestamp": "2026-11-16T20:31:30.758+00:00", "method": "POST", "route": "/submit", "input": {"text_length": 1072, "text_preview": "The western part of the United States, like other countries located along the Pa", "creator_id": "cap_after1_153127_c2_1"}, "status": 500, "outcome": "error", "output": {"error": "internal_error", "message": "Something went wrong on our side and the request was not completed. Please try a..."}, "duration_ms": 40.5, "detector_loaded_at_start": true, "exception": "PermissionError: [Errno 13] Permission denied: '/Users/carcon/projects/ai201-project4-provenance-guard-starter-v2026/logs/audit.jsonl'"}
+```
+
+**After**
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 1. Every request leaves exactly one complete log record | 20 of 20 | 20/20 | 20/20 | 20/20 | MET |
+| 2. A crash still writes a record and returns JSON | 3 of 3 | 3/3 (record 3/3, JSON response 3/3) | 3/3 (record 3/3, JSON response 3/3) | 3/3 (record 3/3, JSON response 3/3) | MET |
+| 3. Cold start is bounded and the log reports it correctly | 3 of 3 checks | 3/3 (first 3055.3 ms, second 33.2 ms) | 3/3 (first 1682.1 ms, second 30.3 ms) | 3/3 (first 1701.9 ms, second 30.5 ms) | MET |
+| 4. A valid appeal always changes status and is always recorded | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 5. Bad input gets a clear error, never a crash | 4 of 4, then /ping 200 | 4/4, /ping 200 | 4/4, /ping 200 | 4/4, /ping 200 | MET |
+
+**Before and after, side by side**
+
+| Criterion | Target | Before: runs 1, 2, 3 | Before | After: runs 1, 2, 3 | After |
+|---|---|---|---|---|---|
+| 1. One complete record per request | 20 of 20 | 20/20, 20/20, 20/20 | MET | 20/20, 20/20, 20/20 | MET |
+| 2. A crash writes a record and returns JSON | 3 of 3 | 0/3, 0/3, 0/3 | MISSED | 3/3, 3/3, 3/3 | MET |
+| 2, record half | 3 of 3 | 3/3, 3/3, 3/3 | | 3/3, 3/3, 3/3 | |
+| 2, JSON response half | 3 of 3 | 0/3, 0/3, 0/3 | | 3/3, 3/3, 3/3 | |
+| 3. Cold start, all three checks | 3 of 3 | 3/3, 3/3, 3/3 | MET | 3/3, 3/3, 3/3 | MET |
+| 3, first submission (limit 10,000 ms) | | 2,922.7, 1,686.2, 1,699.9 ms | | 3,055.3, 1,682.1, 1,701.9 ms | |
+| 3, second submission (limit 100 ms) | | 33.6, 31.1, 30.5 ms | | 33.2, 30.3, 30.5 ms | |
+| 4. Appeals | 5 of 5 | 5/5, 5/5, 5/5 | MET | 5/5, 5/5, 5/5 | MET |
+| 5. Bad input | 4 of 4, then /ping 200 | 4/4, 4/4, 4/4, ping 200 each | MET | 4/4, 4/4, 4/4, ping 200 each | MET |
+
+**Did it help?**
+
+Yes. Criterion 2 went from 0 of 3 to 3 of 3 in every trial, so it moved from
+MISSED to MET. The JSON response half went from 0 of 9 crashes to 9 of 9. The
+record half was 9 of 9 both times, so the fix did not disturb the logging.
+
+How I know it was this change: the script, the forced crash and the trial
+procedure were identical in both sets. The only thing that changed between
+them is the one commit that adds the handler.
+
+What it cost elsewhere: nothing I can measure. The other four criteria have
+the same scores, and the timings sit in the same range (first submission
+1,682 to 3,055 ms after, 1,686 to 2,923 ms before; second submission 30.3 to
+33.2 ms after, 30.5 to 33.6 ms before). Flask still prints the traceback in
+the gunicorn terminal, so nothing is hidden from me. One trade is real,
+though: the client now gets the same generic message for every unexpected
+failure, so it can't tell a permissions problem from a bug in my code. I think
+that is the right side of the trade, because the cause belongs in the log, not
+in a response to a stranger.
+
+One thing the runs showed that I didn't expect and haven't explained: in both
+sets the first trial's cold start took about 3 seconds and the next two took
+about 1.7 seconds. I didn't investigate why.
