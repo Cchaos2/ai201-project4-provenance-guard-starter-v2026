@@ -169,3 +169,92 @@ and it should never take the service down for other writers.
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+## Capstone (Unit 9) — acceptance criteria
+
+Written and committed before any test of these criteria was run. The measurements they cite (42.4 ms, 53.9 ms and 3,180 ms) come from the Milestone 3 instrumentation session. Criteria 1–3 are new and are about the extension (the request log, the gunicorn run path, and the cold-start measurement). Criteria 4–5 are my Unit 7 criteria 4 and 5, copied unchanged.
+
+**How to run a trial.** Stop the service. Start it again with the gunicorn command in RUNNING.md. Run `python run_capstone.py` once. Every criterion below is checked in each of 3 trials.
+
+---
+
+### 1. Every request leaves exactly one complete log record
+
+**Target:** In each trial, the scripted session sends the 20 requests below. While those 20 are sent, `logs/requests.jsonl` must grow by exactly 20 lines. Every new line must parse as JSON and contain at least these eight fields: `timestamp`, `method`, `route`, `input`, `status`, `outcome`, `output`, `duration_ms`. Records also carry a ninth field, `detector_loaded_at_start`, but this criterion doesn't depend on it. Target: 20 of 20, in each of 3 trials.
+
+| Requests | Count | Expected status |
+|---|---|---|
+| `GET /health`, `POST /ping`, `GET /log` | 3 | 200 |
+| Valid `/submit`, each with its own `creator_id` | 3 | 200 |
+| Valid `/submit`, all from one `creator_id` | 7 | 200 five times, then 429 twice |
+| `/submit` with no text | 2 | 400 |
+| `/submit` with `"hi"` | 2 | 422 |
+| Valid `/appeal` | 1 | 200 |
+| `/appeal` with an unknown id | 2 | 404 |
+
+The session covers these five status codes: 200, 400, 404, 422 and 429. It does not cover 405, 413 or 503, which the service can also return.
+
+**Why this target:** The log is the only evidence of what my service did. A missing line can't be seen afterwards: a log with 19 of 20 lines looks exactly like a complete one unless someone counts. So anything below 100% would allow the silent loss the log exists to prevent.
+
+---
+
+### 2. A crash still writes a record and returns JSON
+
+**Target:** I force an unhandled exception in `POST /submit` by making the audit log read-only (`chmod a-w logs/audit.jsonl`) and then sending a valid `/submit`. The route should fail when it tries to write the decision. A crash counts as passing only if both halves hold:
+
+- **Record:** `logs/requests.jsonl` gets a record with `status: 500`, `outcome: "error"`, a non-empty `exception` field, and a `duration_ms`.
+- **Response:** the client gets a JSON body with an `error` field and a `message` field.
+
+Target: 3 of 3 forced crashes, in each of 3 trials. After each trial I restore write permission (`chmod u+w logs/audit.jsonl`).
+
+**Why this target:** My Unit 9 log has no 500 entries because nothing crashed, so this path of the logging hook has never actually run. A crash is the event I'd most need a record of. A log that drops crashes fails exactly when it matters, so the target is 100%. The JSON response is part of the target because every other error in my service already returns `{"error", "message"}`, and a client shouldn't have to handle a different format just because the failure was unexpected.
+
+---
+
+### 3. Cold start is bounded and the log reports it correctly
+
+**Target:** In each trial, all three of these must hold:
+
+1. The first `POST /submit` after the restart takes at most 10,000 ms (`duration_ms`).
+2. That record has `detector_loaded_at_start: false`.
+3. The second `POST /submit` has `detector_loaded_at_start: true` and takes at most 100 ms.
+
+The two submissions are pieces 1 and 2 of `MY_WRITING` in `scenarios.py` (175 and 102 words), each under its own `creator_id`.
+
+Target: all three checks hold, in each of 3 trials.
+
+**Why this target:** I measured one cold start at 3,180 ms, so 10,000 ms gives about three times that for a slower disk or a busy machine. It also stays far below gunicorn's `--timeout 120`, where the worker would be killed. The 100 ms warm bound is about twice the slowest warm run I measured (53.9 ms, mean 42.4 ms). That's loose enough for normal noise, but it would catch a model that reloads on every request. The flag checks matter because my cost write-up separates cold runs from warm ones using that field, and a flag that is always `true` would make that split wrong without any visible sign.
+
+---
+
+### 4. A valid appeal always changes status and is always recorded *(Unit 7 criterion 4, unchanged)*
+
+For 5 out of 5 appeals sent to `POST /appeal` with a `content_id` returned by
+an earlier `POST /submit`, the response is `200` with `status:
+"under_review"`, and `GET /log` shows a new appeal entry for that content_id
+containing the writer's reasoning, while the original `decided` entry is
+still there unchanged.
+
+**Why this target:**
+The appeal is the only recourse for a writer who was
+wrongly flagged, like the second-language writer in my false-positive trace.
+If it ever fails silently, that person has no way to be heard. This part of
+the system is plain code with no model involved, so 100% is the honest
+target, not an easy one.
+
+---
+
+### 5. Bad input gets a clear error, never a crash *(Unit 7 criterion 5, unchanged)*
+
+Four malformed `POST /submit` requests (`text` missing, `text` empty `""`,
+`text` only whitespace, and `text: null`) each return a `400` with a JSON body
+containing an `error` field and a readable `message`. After all four,
+`POST /ping` still returns `200`. This holds in 4 of 4 cases, in each of 3
+trials.
+
+**Why this target:**
+Scoring empty text would either crash the service (the
+detector raises an error on fewer than 3 tokens) or produce a meaningless
+confidence that could still be shown to a reader as a judgment about a
+person. A crash on malformed input is one of the most common real failures,
+and it should never take the service down for other writers.
