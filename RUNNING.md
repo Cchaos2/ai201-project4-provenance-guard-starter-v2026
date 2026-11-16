@@ -17,13 +17,13 @@ here is the one I use.
 
 ### What the environment needs
 
-| Thing | What |
-|---|---|
+| Thing | What                                                                                                                                                      |
+|---|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Operating system | macOS or Linux. gunicorn does not run on Windows: there, use WSL, or start with `python app.py` instead (same app, same logs, Flask's development server) |
-| Python | 3.11, 3.12 or 3.13, not 3.14. I ran it on 3.X.Y |
-| Dependencies | `requirements.txt`, every package pinned with a lower and an upper bound: Flask, Flask-Limiter, requests, transformers, torch, gunicorn, certifi |
-| Model file | `gpt2` from Hugging Face, about 550 MB, downloaded once by `python detector.py` into `~/.cache/huggingface/hub/` |
-| Keys and accounts | None. Nothing here calls a hosted service |
+| Python | 3.11, 3.12 or 3.13, not 3.14. I ran it on 3.13.17                                                                                                         |
+| Dependencies | `requirements.txt`, every package pinned with a lower and an upper bound: Flask, Flask-Limiter, requests, transformers, torch, gunicorn, certifi          |
+| Model file | `gpt2` from Hugging Face, about 525 MB, downloaded once by `python detector.py` into `~/.cache/huggingface/hub/`                                          |
+| Keys and accounts | None. Nothing here calls a hosted service                                                                                                                 |
 
 ### One-time setup, from a clean clone
 
@@ -369,4 +369,6 @@ is evidence, and the entries you paste into your README are what unit 8 grades.
 
 **Do not delete and recreate this repository.** You submit the same URL both
 units.
+
+
 

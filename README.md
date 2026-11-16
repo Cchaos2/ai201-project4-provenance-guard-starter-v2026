@@ -2320,3 +2320,113 @@ in a response to a stranger.
 One thing the runs showed that I didn't expect and haven't explained: in both
 sets the first trial's cold start took about 3 seconds and the next two took
 about 1.7 seconds. I didn't investigate why.
+
+
+**What's Still Broken**
+
+After the one improvement, all five criteria are MET. That doesn't mean nothing
+is broken. It means my criteria stopped finding it. This is what I know is
+still wrong or still unproven.
+
+**The target I set too low: criterion 3.** I allowed the first submission after
+a start 10,000 ms. Across the seven starts I measured under gunicorn (one in
+Milestone 3, six in the trials) it took between 1,682.1 and 3,180.3 ms. So the
+limit was more than three times the slowest start I ever saw, and I could not
+have missed it short of something being badly wrong with the machine. I'd
+tighten it to **4,000 ms**. All seven of my starts would still pass, and a
+start twice as slow as today's slowest would be a miss.
+
+**Criterion 2 is MET, but narrowly.** It forces one kind of crash (a read-only
+audit log) in one route (`/submit`). Passing shows the handler works for that
+exception. My claim that it covers every unhandled exception rests on how
+Flask routes errors, not on a test.
+*What I'd do:* force a second, different crash in a different route.
+*Why I stopped:* one improvement per unit, and I don't change criteria after
+the results are in.
+
+**Errors that Flask raises itself probably still come back as HTML.** A `404`
+for an unknown route and a `405` for a wrong method never pass through my
+branches, which is the same mechanism as the miss I diagnosed. I haven't
+measured it.
+*What I'd do:* one handler for `HTTPException` that answers in the same
+`{"error", "message"}` shape, and a criterion that checks it.
+*Why I stopped:* it is outside my five criteria, and it would have been a
+second change.
+
+**The setup steps are untested from a clean checkout.** `python3 -m venv .venv`
+failed on my machine with an `ensurepip` error in a fresh clone. The start
+command is proven, because every result in this section came from the service
+running under it. The six setup commands above it in `RUNNING.md` are not.
+*What I'd do:* run them in a container or on a second machine.
+*Why I stopped:* fixing it meant changing the Python installation my other
+projects depend on, and I wasn't willing to risk that for this.
+
+**The request log published a path from my machine.** The `exception` field
+stores the exception's whole message, and a `PermissionError` message contains
+the absolute path of the file. So the 18 crash records in
+`logs/requests.jsonl` each contain `/Users/.../logs/audit.jsonl`. I designed
+the `input` field to keep at most 80 characters of a writer's text, and never
+checked what the log discloses about the server itself.
+*What I'd do:* log the exception's type only, and add a criterion about what
+the log must never contain.
+*Why I stopped:* I noticed it after the results were committed, and I'm not
+rewriting history to hide it.
+
+**When the audit log can't be written, every submission fails and nothing says
+so.** After my fix the client gets a clean JSON `500`, but `/submit` stays down
+until someone fixes the file. From reading `app.py::health`, `GET /health`
+would still answer `"ok": true`, because it only reads the audit log. I
+haven't measured that.
+*What I'd do:* make `/health` check that both logs can be written.
+*Why I stopped:* same reason, one change.
+
+**I can't explain the cold-start spread.** In both result sets the first
+trial's cold start took about 3 seconds and the next two about 1.7 seconds.
+*What I'd do:* time the model load separately from the scoring, so the log
+shows where the first request's time goes.
+*Why I stopped:* the criterion was met either way, and I ran out of time.
+
+**Everything in my Unit 8 "What's Still Broken" is still true.** The signals,
+weights and thresholds were out of scope for this unit by choice.
+
+**The one thing I'd do first.** I'd run the setup in `RUNNING.md` from a clean
+checkout, in a container or on a second machine. I'd do that before anything
+else because it is the only claim in this capstone with no evidence behind it,
+and every other result here depends on a reader being able to start the
+service at all. The other items improve a system that runs. This one decides
+whether it runs for anyone but me.
+
+**How I Used AI**
+
+**Moment 1: where the timer goes, and how I checked nothing broke**
+
+- *What I asked for:* the logging hook for `app.py`.
+- *What came back:* the hook, placed above the rate limiter on purpose. Flask
+  runs `before_request` functions in the order they are registered, and the
+  limiter refuses a request from inside its own, so a timer registered after
+  it would never start on a `429`. It came with two things to check and an
+  instruction to stop if either failed: `samples/unsure_2.json` must still
+  score 0.6152, the number in my Unit 7 Sample Run, and the `429` records must
+  have a number in `duration_ms`, not `null`. Claude said it had only tested
+  the hook against stand-ins, so my run was the real test.
+- *What I changed:* I ran the checks before committing. The confidence was
+  0.6152, and the `429` records showed 0.3 to 0.4 ms. The same run showed me
+  the first submission taking 2,278.6 ms against about 25 to 31 ms for the
+  later ones, which is where my cold-start criterion came from.
+
+**Moment 2: measuring the cost from the service's side**
+
+- *What I asked for:* how to get a cost number that was measured and not
+  estimated.
+- *What came back:* `measure_cost.py`, which sends the ten pieces of my own
+  writing and then reads each request's `duration_ms` back from
+  `logs/requests.jsonl`, so the number is the service's own measurement and
+  leaves out network time. Each piece goes under its own `creator_id`,
+  because ten submissions from one id would hit my limit of 5 a minute and I'd
+  be timing `429`s. The draft write-up also had a sentence saying the real
+  cost is memory, which Claude flagged as its own wording and not measured.
+- *What I changed:* I measured the environment myself and used my numbers
+  where they differed from the starter's: Python 3.13.17, and 525 MB for the
+  GPT-2 files on my disk where the starter says about 550 MB. The result was
+  42.4 ms per submission (31.0 to 53.9 ms). I kept the sentence about memory,
+  knowing it is an opinion and not a measurement.
