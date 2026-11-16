@@ -215,6 +215,24 @@ if config.RATE_LIMITING_ENABLED:
         }), 429
 
 
+# ── Unhandled exceptions — UNIT 9 (capstone), Milestone 6 ────────────────────
+# Every error this service raises on purpose answers with JSON:
+# {"error": ..., "message": ...}. An exception nobody caught did not. Flask
+# turned it into its own 500, and that default body is an HTML page. This
+# handler gives the unexpected failure the same shape as the expected ones.
+#
+# Flask still logs the traceback before it calls this, and the request log
+# still gets its record (status 500, with the exception's name).
+
+@app.errorhandler(500)
+def internal_error(exc):
+    return jsonify({
+        "error": "internal_error",
+        "message": "Something went wrong on our side and the request was not "
+                   "completed. Please try again.",
+    }), 500
+
+
 # ── The worked example. Already works. Don't edit. ────────────────────────────
 
 @app.post("/ping")
