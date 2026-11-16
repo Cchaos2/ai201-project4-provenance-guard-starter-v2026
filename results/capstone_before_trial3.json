@@ -1,0 +1,28 @@
+{
+  "label": "before",
+  "trial": 3,
+  "when": "2026-11-16 14:16",
+  "server": "gunicorn",
+  "scores": {
+    "1": {
+      "score": "20/20",
+      "passed": true
+    },
+    "2": {
+      "score": "0/3 (record 3/3, JSON response 0/3)",
+      "passed": false
+    },
+    "3": {
+      "score": "3/3 (first 1699.9 ms, second 30.5 ms)",
+      "passed": true
+    },
+    "4": {
+      "score": "5/5",
+      "passed": true
+    },
+    "5": {
+      "score": "4/4, /ping 200",
+      "passed": true
+    }
+  }
+}
